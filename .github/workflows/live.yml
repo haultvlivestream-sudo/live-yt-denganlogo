@@ -1,4 +1,4 @@
-name: YouTube Relay Dual Input (Logo from YT)
+name: YouTube Relay Pro (Logo Download & Small)
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
         description: 'Link Video Utama'
         required: true
       kunci_rtmp:
-        description: 'Stream Key Kamu'
+        description: 'Stream Key YouTube'
         required: true
 
 jobs:
@@ -20,14 +20,14 @@ jobs:
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      - name: Eksekusi Auto-Relay
+      - name: Persiapan Logo & Cek Video
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # 1. Ambil link video LOGO (dari link YT yang kamu kasih)
-          # Kita ambil resolusi kecil saja (360p) biar gak berat
+          # 1. Unduh Video Logo ke lokal (Format mp4 resolusi rendah)
+          echo "Mengunduh logo ke lokal..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          LOGO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=360]" -g "$LINK_LOGO")
+          yt-dlp --cookies cookies.txt -f "bestvideo[height<=360]+bestaudio/best[height<=360]" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
 
           # 2. LOOPING CHECKER Video Utama
           echo "Menunggu sumber video utama siap..."
@@ -37,18 +37,18 @@ jobs:
               echo "SUMBER TERDETEKSI! Memulai streaming..."
               break
             else
-              echo "Video utama belum live. Tunggu 1 detik..."
+              echo "Video utama belum siap. Cek lagi dalam 1 detik..."
               sleep 1
             fi
           done
 
           # 3. JALANKAN STREAMING
-          # [1:v] adalah input logo dari YouTube
-          # Kita pakai colorkey 008100 untuk hapus background hijaunya
+          # -stream_loop -1 diletakkan sebelum input logo lokal
+          # scale=75:-1 (Ukuran setengah dari sebelumnya)
           
-          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i "$LOGO_URL" \
+          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
           -filter_complex \
-          "[1:v]colorkey=0x008100:0.1:0.1,scale=150:-1[logo]; \
+          "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; \
            [0:v][logo]overlay=W-w-15:15:shortest=1" \
           -c:v libx264 -preset veryfast -b:v 2500k \
           -c:a aac -ar 44100 -b:a 128k \
