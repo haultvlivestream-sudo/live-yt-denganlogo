@@ -1,4 +1,4 @@
-name: YouTube Relay Pro (Logo 85px + Margin 30px)
+name: YouTube Relay Pro (Smooth Streaming 85px)
 
 on:
   workflow_dispatch:
@@ -24,32 +24,33 @@ jobs:
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # 1. Unduh Video Logo ke lokal (360p)
-          echo "Mengunduh logo ke lokal..."
+          # 1. Unduh Video Logo
+          echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          yt-dlp --cookies cookies.txt -f "bestvideo[height<=360]+bestaudio/best[height<=360]" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
+          yt-dlp --cookies cookies.txt -f "bestvideo[height<=360]" --merge-output-format mp4 "$LINK_LOGO" -o raw_logo.mp4
 
-          # 2. LOOPING CHECKER Video Utama
+          # 2. PRE-PROCESS LOGO (PENTING: Biar gak lag saat live)
+          # Kita hilangkan warna hijau dan perkecil ukurannya DISINI, bukan saat live.
+          # Kita simpan jadi file .mov karena mendukung transparansi (Alpha Channel)
+          echo "Memproses logo agar ringan saat live..."
+          ffmpeg -i raw_logo.mp4 -vf "colorkey=0x008100:0.1:0.1,scale=85:-1" -c:v qtrle -an logo_ready.mov
+
+          # 3. LOOPING CHECKER Video Utama
           echo "Menunggu sumber video utama siap..."
           while true; do
             VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
             if [ ! -z "$VIDEO_URL" ]; then
-              echo "SUMBER TERDETEKSI! Memulai streaming..."
+              echo "SUMBER TERDETEKSI!"
               break
             else
-              echo "Video utama belum siap. Cek lagi dalam 1 detik..."
+              echo "Video utama belum siap. Cek lagi..."
               sleep 1
             fi
           done
 
-          # 3. JALANKAN STREAMING
-          # scale=85:-1 (Ukuran pas sesuai request)
-          # overlay=W-w-30:30 (Jarak 30px dari kanan dan 30px dari atas)
-          
-          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
-          -filter_complex \
-          "[1:v]colorkey=0x008100:0.1:0.1,scale=85:-1[logo]; \
-           [0:v][logo]overlay=W-w-30:30:shortest=1" \
+          # 4. JALANKAN STREAMING (FFmpeg sekarang kerja sangat ringan)
+          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_ready.mov \
+          -filter_complex "[0:v][1:v]overlay=W-w-30:30" \
           -c:v libx264 -preset veryfast -b:v 2500k \
           -c:a aac -ar 44100 -b:a 128k \
           -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
