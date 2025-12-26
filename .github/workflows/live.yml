@@ -1,37 +1,16 @@
-name: YouTube Relay Pro (Smooth Streaming 85px)
-
-on:
-  workflow_dispatch:
-    inputs:
-      link_youtube:
-        description: 'Link Video Utama'
-        required: true
-      kunci_rtmp:
-        description: 'Stream Key YouTube'
-        required: true
-
-jobs:
-  streaming:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install Tooling
-        run: |
-          sudo apt update && sudo apt install ffmpeg jq -y
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-          sudo chmod a+rx /usr/local/bin/yt-dlp
-
-      - name: Persiapan Logo & Cek Video
+- name: Persiapan Logo & Cek Video
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # 1. Unduh Video Logo
+          # 1. Unduh Logo (Tanpa filter format yang ribet biar gak Error)
           echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          yt-dlp --cookies cookies.txt -f "bestvideo[height<=360]" --merge-output-format mp4 "$LINK_LOGO" -o raw_logo.mp4
+          
+          # Pakai -f "best" supaya YouTube kasih apa aja yang dia mau, yang penting dapet file
+          yt-dlp --cookies cookies.txt -f "best" --merge-output-format mp4 "$LINK_LOGO" -o raw_logo.mp4
 
-          # 2. PRE-PROCESS LOGO (PENTING: Biar gak lag saat live)
-          # Kita hilangkan warna hijau dan perkecil ukurannya DISINI, bukan saat live.
-          # Kita simpan jadi file .mov karena mendukung transparansi (Alpha Channel)
+          # 2. PRE-PROCESS LOGO (Ubah ukuran & hapus background disini)
+          # Kita paksa jadi 85px dan hapus warna 008100
           echo "Memproses logo agar ringan saat live..."
           ffmpeg -i raw_logo.mp4 -vf "colorkey=0x008100:0.1:0.1,scale=85:-1" -c:v qtrle -an logo_ready.mov
 
@@ -48,7 +27,7 @@ jobs:
             fi
           done
 
-          # 4. JALANKAN STREAMING (FFmpeg sekarang kerja sangat ringan)
+          # 4. JALANKAN STREAMING
           ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_ready.mov \
           -filter_complex "[0:v][1:v]overlay=W-w-30:30" \
           -c:v libx264 -preset veryfast -b:v 2500k \
