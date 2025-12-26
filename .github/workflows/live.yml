@@ -1,0 +1,57 @@
+name: YouTube Auto-Relay + Logo Chroma
+
+on:
+  workflow_dispatch:
+    inputs:
+      link_youtube:
+        description: 'Link YouTube (Video/Live)'
+        required: true
+      kunci_rtmp:
+        description: 'Stream Key YouTube Kamu'
+        required: true
+
+jobs:
+  streaming:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Tooling
+        run: |
+          sudo apt update && sudo apt install ffmpeg jq -y
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Eksekusi Auto-Relay
+        run: |
+          # 1. Setup Cookies
+          echo "${{ secrets.YT_COOKIES }}" > cookies.txt
+
+          # 2. Download Logo dari Drive (ID: 1qcL13fkoJQzmW1O0GkCRDDgsKUc4DTX_)
+          FILE_ID="1qcL13fkoJQzmW1O0GkCRDDgsKUc4DTX_"
+          curl -L "https://drive.google.com/uc?export=download&id=$FILE_ID" -o logo.gif
+
+          # 3. LOOPING CHECKER (Tunggu sampai Video Ready)
+          echo "Menunggu sumber video siap..."
+          while true; do
+            VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
+            
+            if [ ! -z "$VIDEO_URL" ]; then
+              echo "SUMBER TERDETEKSI! Memulai proses streaming..."
+              break
+            else
+              echo "Video belum siap / belum live. Cek lagi dalam 1 detik..."
+              sleep 1
+            fi
+          done
+
+          # 4. JALANKAN STREAMING DENGAN OVERLAY
+          # colorkey=0x008100 (Warna hijau custom kamu)
+          # scale=120:-1 (Ukuran logo diperkecil biar pas)
+          # overlay=W-w-15:15 (Pojok kanan atas, jarak 15px dari tepi)
+          
+          ffmpeg -re -i "$VIDEO_URL" -ignore_loop 0 -i logo.gif \
+          -filter_complex \
+          "[1:v]colorkey=0x008100:0.1:0.1,scale=120:-1[logo]; \
+           [0:v][logo]overlay=W-w-15:15" \
+          -c:v libx264 -preset veryfast -b:v 2500k \
+          -c:a aac -ar 44100 -b:a 128k \
+          -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
