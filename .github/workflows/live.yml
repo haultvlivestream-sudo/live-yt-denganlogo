@@ -1,4 +1,4 @@
-name: YouTube Relay Pro (Logo Download & Small)
+name: YouTube Relay Pro (Logo 85px + Margin 30px)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # 1. Unduh Video Logo ke lokal (Format mp4 resolusi rendah)
+          # 1. Unduh Video Logo ke lokal (360p)
           echo "Mengunduh logo ke lokal..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
           yt-dlp --cookies cookies.txt -f "bestvideo[height<=360]+bestaudio/best[height<=360]" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
@@ -43,13 +43,13 @@ jobs:
           done
 
           # 3. JALANKAN STREAMING
-          # -stream_loop -1 diletakkan sebelum input logo lokal
-          # scale=75:-1 (Ukuran setengah dari sebelumnya)
+          # scale=85:-1 (Ukuran pas sesuai request)
+          # overlay=W-w-30:30 (Jarak 30px dari kanan dan 30px dari atas)
           
           ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
           -filter_complex \
-          "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; \
-           [0:v][logo]overlay=W-w-15:15:shortest=1" \
+          "[1:v]colorkey=0x008100:0.1:0.1,scale=85:-1[logo]; \
+           [0:v][logo]overlay=W-w-30:30:shortest=1" \
           -c:v libx264 -preset veryfast -b:v 2500k \
           -c:a aac -ar 44100 -b:a 128k \
           -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
