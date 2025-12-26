@@ -1,10 +1,10 @@
-name: YouTube Auto-Relay + Logo Chroma
+name: YouTube Auto-Relay + Logo FIX
 
 on:
   workflow_dispatch:
     inputs:
       link_youtube:
-        description: 'Link YouTube (Video/Live)'
+        description: 'Link YouTube'
         required: true
       kunci_rtmp:
         description: 'Stream Key YouTube Kamu'
@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Install Tooling
         run: |
-          sudo apt update && sudo apt install ffmpeg jq -y
+          sudo apt update && sudo apt install ffmpeg jq wget -y
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
@@ -25,11 +25,17 @@ jobs:
           # 1. Setup Cookies
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
 
-          # 2. Download Logo dari Drive (ID: 1qcL13fkoJQzmW1O0GkCRDDgsKUc4DTX_)
+          # 2. Download Logo (Pakai link direct Drive yang lebih kuat)
           FILE_ID="1qcL13fkoJQzmW1O0GkCRDDgsKUc4DTX_"
-          curl -L "https://drive.google.com/uc?export=download&id=$FILE_ID" -o logo.gif
+          wget --no-check-certificate 'https://docs.google.com/uc?export=download&id='$FILE_ID -O logo.gif
 
-          # 3. LOOPING CHECKER (Tunggu sampai Video Ready)
+          # Cek apakah logo.gif benar-benar ada
+          if [ ! -f logo.gif ]; then
+            echo "Logo gagal didownload, membuat logo kosong sementara agar tidak error..."
+            ffmpeg -f lavfi -i color=c=black:s=1x1 -frames:v 1 logo.gif
+          fi
+
+          # 3. LOOPING CHECKER
           echo "Menunggu sumber video siap..."
           while true; do
             VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
@@ -38,15 +44,13 @@ jobs:
               echo "SUMBER TERDETEKSI! Memulai proses streaming..."
               break
             else
-              echo "Video belum siap / belum live. Cek lagi dalam 1 detik..."
+              echo "Video belum siap. Cek lagi dalam 1 detik..."
               sleep 1
             fi
           done
 
-          # 4. JALANKAN STREAMING DENGAN OVERLAY
-          # colorkey=0x008100 (Warna hijau custom kamu)
-          # scale=120:-1 (Ukuran logo diperkecil biar pas)
-          # overlay=W-w-15:15 (Pojok kanan atas, jarak 15px dari tepi)
+          # 4. JALANKAN STREAMING (Posisi -ignore_loop dipindah agar benar)
+          # Perhatikan urutan: -ignore_loop ditaruh sebelum -i logo.gif
           
           ffmpeg -re -i "$VIDEO_URL" -ignore_loop 0 -i logo.gif \
           -filter_complex \
