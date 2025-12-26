@@ -1,13 +1,13 @@
-name: YouTube Auto-Relay + Logo FIX
+name: YouTube Relay Dual Input (Logo from YT)
 
 on:
   workflow_dispatch:
     inputs:
       link_youtube:
-        description: 'Link YouTube'
+        description: 'Link Video Utama'
         required: true
       kunci_rtmp:
-        description: 'Stream Key YouTube Kamu'
+        description: 'Stream Key Kamu'
         required: true
 
 jobs:
@@ -16,46 +16,40 @@ jobs:
     steps:
       - name: Install Tooling
         run: |
-          sudo apt update && sudo apt install ffmpeg jq wget -y
+          sudo apt update && sudo apt install ffmpeg jq -y
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Eksekusi Auto-Relay
         run: |
-          # 1. Setup Cookies
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
+          
+          # 1. Ambil link video LOGO (dari link YT yang kamu kasih)
+          # Kita ambil resolusi kecil saja (360p) biar gak berat
+          LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
+          LOGO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=360]" -g "$LINK_LOGO")
 
-          # 2. Download Logo (Pakai link direct Drive yang lebih kuat)
-          FILE_ID="1qcL13fkoJQzmW1O0GkCRDDgsKUc4DTX_"
-          wget --no-check-certificate 'https://docs.google.com/uc?export=download&id='$FILE_ID -O logo.gif
-
-          # Cek apakah logo.gif benar-benar ada
-          if [ ! -f logo.gif ]; then
-            echo "Logo gagal didownload, membuat logo kosong sementara agar tidak error..."
-            ffmpeg -f lavfi -i color=c=black:s=1x1 -frames:v 1 logo.gif
-          fi
-
-          # 3. LOOPING CHECKER
-          echo "Menunggu sumber video siap..."
+          # 2. LOOPING CHECKER Video Utama
+          echo "Menunggu sumber video utama siap..."
           while true; do
             VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
-            
             if [ ! -z "$VIDEO_URL" ]; then
-              echo "SUMBER TERDETEKSI! Memulai proses streaming..."
+              echo "SUMBER TERDETEKSI! Memulai streaming..."
               break
             else
-              echo "Video belum siap. Cek lagi dalam 1 detik..."
+              echo "Video utama belum live. Tunggu 1 detik..."
               sleep 1
             fi
           done
 
-          # 4. JALANKAN STREAMING (Posisi -ignore_loop dipindah agar benar)
-          # Perhatikan urutan: -ignore_loop ditaruh sebelum -i logo.gif
+          # 3. JALANKAN STREAMING
+          # [1:v] adalah input logo dari YouTube
+          # Kita pakai colorkey 008100 untuk hapus background hijaunya
           
-          ffmpeg -re -i "$VIDEO_URL" -ignore_loop 0 -i logo.gif \
+          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i "$LOGO_URL" \
           -filter_complex \
-          "[1:v]colorkey=0x008100:0.1:0.1,scale=120:-1[logo]; \
-           [0:v][logo]overlay=W-w-15:15" \
+          "[1:v]colorkey=0x008100:0.1:0.1,scale=150:-1[logo]; \
+           [0:v][logo]overlay=W-w-15:15:shortest=1" \
           -c:v libx264 -preset veryfast -b:v 2500k \
           -c:a aac -ar 44100 -b:a 128k \
           -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
