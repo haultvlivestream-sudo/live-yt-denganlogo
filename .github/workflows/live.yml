@@ -1,4 +1,4 @@
-name: YouTube Relay Pro (Back to 75px - Ultra Smooth)
+Name: YouTube Relay Pro (Auto-Reconnect)
 
 on:
   workflow_dispatch:
@@ -20,35 +20,39 @@ jobs:
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
-      - name: Persiapan Logo & Cek Video
+      - name: Persiapan & Loop Streaming
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # 1. Unduh Logo (Format 'best' agar tidak error format)
+          # 1. Unduh Logo sekali saja
           echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
           yt-dlp --cookies cookies.txt -f "best" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
 
-          # 2. LOOPING CHECKER Video Utama
-          echo "Menunggu sumber video utama siap..."
+          # 2. LOOPING UTAMA (Agar jika ffmpeg mati, dia otomatis jalan lagi)
           while true; do
+            echo "Mencari URL stream video utama..."
             VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
-            if [ ! -z "$VIDEO_URL" ]; then
-              echo "SUMBER TERDETEKSI! Memulai streaming..."
-              break
-            else
-              echo "Video utama belum siap. Tunggu 1 detik..."
-              sleep 1
-            fi
-          done
 
-          # 3. JALANKAN STREAMING (Setelan Lancar 75px)
-          # scale=75:-1 dan margin 15:15
+            if [ ! -z "$VIDEO_URL" ]; then
+              echo "SUMBER TERDETEKSI! Memulai/Melanjutkan streaming..."
+              
+              # Jalankan FFMPEG
+              # Tambahan -reconnect agar ffmpeg mencoba menyambung internal sebelum exit
+              ffmpeg -re \
+                -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
+                -i "$VIDEO_URL" \
+                -stream_loop -1 -i logo_video.mp4 \
+                -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
+                -c:v libx264 -preset veryfast -b:v 2500k \
+                -c:a aac -ar 44100 -b:a 128k \
+                -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
+              
+              echo "FFmpeg terhenti atau koneksi putus. Mencoba kembali dalam 1 detik..."
+            else
+              echo "Video utama tidak ditemukan atau belum live. Cek lagi dalam 1 detik..."
+            fi
+            
+            sleep 1
+          done
           
-          ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
-          -filter_complex \
-          "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; \
-           [0:v][logo]overlay=W-w-15:15:shortest=1" \
-          -c:v libx264 -preset veryfast -b:v 2500k \
-          -c:a aac -ar 44100 -b:a 128k \
-          -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
