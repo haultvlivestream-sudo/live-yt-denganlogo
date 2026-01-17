@@ -16,31 +16,32 @@ jobs:
     steps:
       - name: Install Tooling
         run: |
-          sudo apt update && sudo apt install ffmpeg jq -y
+          # Ditambah nodejs supaya tidak error JavaScript
+          sudo apt update && sudo apt install ffmpeg jq nodejs -y
           sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
 
       - name: Persiapan & Loop Streaming
         run: |
-          # Matikan fitur 'exit on error' agar loop tetap jalan meski yt-dlp/ffmpeg gagal
           set +e 
           
-          # Pakai cat EOF supaya format cookies Netscape kamu tetap asli (tidak rusak)
           cat << 'EOF' > cookies.txt
           ${{ secrets.YT_COOKIES }}
           EOF
           
           echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          yt-dlp --cookies cookies.txt -f "best" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
+          # Tambahkan User-Agent agar lebih aman
+          yt-dlp --cookies cookies.txt --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" -f "best" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4 || echo "Gagal logo, lanjut..."
 
           echo "Memulai sistem pemantauan streaming..."
           
           while true; do
             echo "Mengecek ketersediaan video sumber..."
             
-            # Ambil URL secara hati-hati pakai cookies.txt
-            VIDEO_URL=$(yt-dlp --cookies cookies.txt -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
+            VIDEO_URL=$(yt-dlp --cookies cookies.txt \
+              --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+              -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
               echo "PERINGATAN: Sumber video tidak ditemukan atau sedang offline. Cek lagi dalam 5 detik..."
@@ -50,7 +51,6 @@ jobs:
 
             echo "SUMBER AKTIF! Menjalankan FFmpeg..."
 
-            # Menjalankan FFmpeg dengan parameter ketahanan tinggi
             ffmpeg -re -i "$VIDEO_URL" \
               -stream_loop -1 -i logo_video.mp4 \
               -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
@@ -58,7 +58,7 @@ jobs:
               -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
-            echo "FFmpeg berhenti (mungkin lag atau koneksi putus). Restarting dalam 1 detik..."
+            echo "FFmpeg berhenti. Restarting dalam 1 detik..."
             sleep 1
           done
           
