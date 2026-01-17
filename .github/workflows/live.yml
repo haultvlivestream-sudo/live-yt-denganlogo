@@ -1,14 +1,36 @@
-name: Persiapan & Loop Streaming
+name: YouTube Relay Pro (Auto-Reconnect)
+
+on:
+  workflow_dispatch:
+    inputs:
+      link_youtube:
+        description: 'Link Video Utama'
+        required: true
+      kunci_rtmp:
+        description: 'Stream Key YouTube'
+        required: true
+
+jobs:
+  streaming:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Tooling
+        run: |
+          sudo apt update && sudo apt install ffmpeg jq nodejs -y
+          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo chmod a+rx /usr/local/bin/yt-dlp
+
+      - name: Persiapan & Loop Streaming
         run: |
           set +e 
           
-          # 1. Simpan sebagai .json (sesuai format isi secret kamu)
-          echo '${{ secrets.YT_COOKIES }}' > cookies.json
+          # Menggunakan cat EOF agar isi JSON tidak rusak oleh shell
+          cat << 'EOF' > cookies.json
+          ${{ secrets.YT_COOKIES }}
+          EOF
           
           echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          
-          # 2. Panggil dengan nama file .json
           yt-dlp --cookies cookies.json -f "b" "$LINK_LOGO" -o logo_video.mp4 || echo "Gagal logo, lanjut..."
 
           echo "Memulai sistem pemantauan streaming..."
@@ -16,26 +38,27 @@ name: Persiapan & Loop Streaming
           while true; do
             echo "Mengecek ketersediaan video sumber..."
             
-            # 3. Gunakan cookies.json di sini juga
+            # Mengambil URL video dengan cookies JSON
             VIDEO_URL=$(yt-dlp --cookies cookies.json \
               --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
               -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "PERINGATAN: Sumber tidak ditemukan/Cookies error. Cek 10 detik..."
+              echo "PERINGATAN: Sumber tidak ditemukan. Cek lagi dalam 10 detik..."
               sleep 10
               continue
             fi
 
-            echo "SUMBER AKTIF! FFmpeg running..."
+            echo "SUMBER AKTIF! Menjalankan FFmpeg..."
 
             ffmpeg -re -i "$VIDEO_URL" \
               -stream_loop -1 -i logo_video.mp4 \
               -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
-              -c:v libx264 -preset veryfast -b:v 2500k \
-              -c:a aac -ar 44100 -b:a 128k \
+              -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k \
+              -pix_fmt yuv420p -g 60 -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
+            echo "FFmpeg terputus, mencoba menyambung kembali..."
             sleep 5
           done
           
