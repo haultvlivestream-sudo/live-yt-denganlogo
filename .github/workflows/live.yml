@@ -1,4 +1,4 @@
-name: YouTube Relay Pro Ultra (No-Logo Edition)
+name: YouTube Relay Simple (No-Logo)
 
 on:
   workflow_dispatch:
@@ -9,9 +9,6 @@ on:
       kunci_rtmp:
         description: 'Stream Key YouTube'
         required: true
-      po_token:
-        description: 'PO Token (Ambil dari ekstensi browser)'
-        required: true
 
 jobs:
   streaming:
@@ -20,57 +17,51 @@ jobs:
       - name: 1. Checkout
         uses: actions/checkout@v4
 
-      - name: 2. Install Node.js (Pondasi JS Runtime)
+      - name: 2. Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 3. Install FFmpeg & yt-dlp Nightly
+      - name: 3. Install Tools
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
           sudo curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
           yt-dlp -U
 
-      - name: 4. Menjalankan Relay Streaming
+      - name: 4. Jalankan Stream
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          PO_TOKEN: ${{ github.event.inputs.po_token }}
         run: |
           set +e
           echo "$YT_COOKIES" > cookies.txt
           
-          echo "Sistem Siap. Memulai pemantauan..."
-
           while true; do
-            echo "--- [$(date)] Mengecek Link Sumber ---"
+            echo "--- Mengecek Sumber Video ---"
             
-            # Menggunakan --js-runtime node (Koreksi dari nodejs)
-            # Menambahkan PO Token agar tidak kena blokir bot
+            # Tetap gunakan --js-runtime node agar cookies awet
             VIDEO_URL=$(yt-dlp --cookies cookies.txt \
                                --js-runtime node \
                                --force-ipv4 \
-                               --extractor-args "youtube:player_client=mweb,web;po_token=web+$PO_TOKEN" \
+                               --extractor-args "youtube:player_client=mweb,web" \
                                -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "Gagal mengambil URL. YouTube mendeteksi bot atau PO Token expired."
-              echo "Saran: Ambil PO Token baru dan jalankan ulang."
+              echo "Gagal Ambil URL. YouTube mungkin butuh PO Token atau Cookies baru."
               sleep 15
               continue
             fi
 
-            echo "Berhasil! Memulai Streaming ke YouTube..."
+            echo "SUMBER AKTIF! Streaming sedang berjalan..."
 
-            # FFmpeg versi ringan: Tanpa Filter Complex, Tanpa Overlay
-            # Langsung copy stream atau re-encode ringan
+            # FFmpeg mode direct (lebih ringan)
             ffmpeg -re -connect_delay 5000 -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2000 \
               -i "$VIDEO_URL" \
               -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
               -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
-            echo "FFmpeg berhenti/koneksi putus. Mencoba reconnect dalam 5 detik..."
+            echo "Koneksi terputus, mengulang..."
             sleep 5
           done
           
