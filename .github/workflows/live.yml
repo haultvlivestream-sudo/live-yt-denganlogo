@@ -14,39 +14,54 @@ jobs:
   streaming:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Checkout Repository
+      # --- LANGKAH 1: Persiapan Dasar ---
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Install Node.js (WAJIB PERTAMA)
+      # --- LANGKAH 2: Pondasi Utama (Node.js) ---
+      # Ini WAJIB di depan agar yt-dlp bisa memanggilnya nanti
+      - name: Install Node.js (JavaScript Runtime)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: 3. Verifikasi Node.js & Install Tooling
+      # --- LANGKAH 3: Install Semua Tools ---
+      - name: Install Tools (FFmpeg & yt-dlp)
         run: |
-          node -v # Mengecek apakah Node.js sudah benar-benar terinstal
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl
           
-          # Install yt-dlp versi nightly (paling update untuk bypass)
+          # Gunakan versi nightly untuk bypass terbaru
           sudo curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
-          yt-dlp -U
+          
+          # Verifikasi instalasi
+          echo "Node.js Version: $(node -v)"
+          echo "yt-dlp Version: $(yt-dlp --version)"
 
-      - name: 4. Eksekusi Streaming
+      # --- LANGKAH 4: Persiapan Data & Streaming ---
+      - name: Menjalankan Stream
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          set +e 
+          set +e
+          
+          # Simpan cookies ke file
           echo "$YT_COOKIES" > cookies.txt
           
-          # Download logo
-          yt-dlp --cookies cookies.txt --js-runtime nodejs --extractor-args "youtube:player_client=mweb" -f "best" "https://youtu.be/zR6n39ZWrJM" -o logo_video.mp4
+          # Unduh logo overlay sebelum mulai loop
+          echo "Mengunduh logo..."
+          yt-dlp --cookies cookies.txt \
+                 --js-runtime nodejs \
+                 --extractor-args "youtube:player_client=mweb" \
+                 -f "best[height<=720]" \
+                 "https://youtu.be/zR6n39ZWrJM" -o logo_video.mp4
 
+          # Loop Utama Streaming
           while true; do
-            echo "Mengambil URL Video Sumber..."
+            echo "Mengecek Sumber Video..."
             
-            # Memaksa yt-dlp menggunakan Node.js yang sudah diinstall di langkah 2
+            # Ambil URL Video menggunakan Node.js sebagai runtime
             VIDEO_URL=$(yt-dlp --cookies cookies.txt \
                                --js-runtime nodejs \
                                --force-ipv4 \
@@ -54,14 +69,23 @@ jobs:
                                -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "Gagal tembus! Pastikan Cookies/NodeJS aktif. Coba lagi..."
+              echo "Gagal Ambil URL. Coba lagi dalam 10 detik..."
               sleep 10
               continue
             fi
 
-            ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
+            echo "Sumber ditemukan! Memulai FFmpeg..."
+
+            # Proses Streaming dengan FFmpeg
+            ffmpeg -re -connect_delay 5000 -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2000 \
+              -i "$VIDEO_URL" \
+              -stream_loop -1 -i logo_video.mp4 \
               -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=150:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
-              -c:v libx264 -preset veryfast -b:v 3000k -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
-            
+              -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k \
+              -c:a aac -ar 44100 -b:a 128k \
+              -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
+
+            echo "FFmpeg berhenti, mengulang kembali..."
             sleep 5
           done
+          
