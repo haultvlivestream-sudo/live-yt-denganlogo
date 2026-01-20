@@ -1,69 +1,81 @@
-name: YouTube Relay Pro (Auto-Reconnect)
+name: YouTube Relay Pro (Ultra-Sakti)
 
 on:
   workflow_dispatch:
     inputs:
       link_youtube:
-        description: 'Link Video Sumber (YouTube)'
+        description: 'Link Video Utama'
         required: true
       kunci_rtmp:
-        description: 'Stream Key YouTube Tujuan'
+        description: 'Stream Key YouTube'
         required: true
 
 jobs:
   streaming:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Tooling (FFmpeg, yt-dlp, Node.js)
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js (PENTING: Untuk JavaScript Runtime)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Tooling & yt-dlp Terbaru
         run: |
-          sudo apt update
-          sudo apt install ffmpeg jq nodejs -y
-          sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+          sudo apt update && sudo apt install ffmpeg jq -y
+          # Menggunakan versi nightly agar selalu mendapatkan fix bypass YouTube terbaru
+          sudo curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
+          yt-dlp -U
 
       - name: Persiapan & Loop Streaming
         run: |
-          # Jangan matikan script jika ada satu perintah yang gagal
           set +e 
-
-          # Menulis cookies dari GitHub Secrets ke file
+          
+          # Simpan cookies dari Secrets
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
           
-          # User-Agent agar tidak terdeteksi sebagai bot mentah
-          UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-          echo "Mengunduh logo overlay..."
+          # 1. Unduh Logo dengan Client mweb agar lebih aman
+          echo "Mengunduh logo..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          yt-dlp --cookies cookies.txt --user-agent "$UA" -f "best" --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
+          yt-dlp --cookies cookies.txt \
+                 --extractor-args "youtube:player_client=mweb" \
+                 -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
+                 --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
 
-          echo "--- MEMULAI SISTEM RELAY ---"
+          echo "Memulai sistem pemantauan streaming..."
           
           while true; do
-            echo "Mencari URL stream dari sumber..."
+            echo "Mengecek ketersediaan video sumber..."
             
-            # Mendapatkan Direct URL Video dengan JavaScript Runtime Node.js
-            VIDEO_URL=$(yt-dlp --cookies cookies.txt --user-agent "$UA" --js-runtime nodejs -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
+            # 2. Ambil URL dengan Client mweb + Force IPv4 (Seringkali IPv6 GitHub diblokir YouTube)
+            # Menambahkan --js-runtime nodejs secara eksplisit
+            VIDEO_URL=$(yt-dlp --cookies cookies.txt \
+                               --js-runtime nodejs \
+                               --force-ipv4 \
+                               --extractor-args "youtube:player_client=mweb" \
+                               -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "Error: Gagal mengambil URL. Cek Cookies atau Link Video."
-              # Tampilkan log error singkat untuk debugging
-              yt-dlp --cookies cookies.txt --user-agent "$UA" --js-runtime nodejs -g "${{ github.event.inputs.link_youtube }}" 2>&1 | tail -n 3
-              sleep 1
+              echo "PERINGATAN: Gagal mengambil URL. Mungkin butuh PO Token atau Cookies baru. Cek dalam 10 detik..."
+              sleep 10
               continue
             fi
 
-            echo "Sumber ditemukan! Memulai Push Stream ke RTMP..."
+            echo "SUMBER AKTIF! Menjalankan FFmpeg..."
 
-            # Proses Relay dengan FFmpeg
-            ffmpeg -re -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2 \
+            # 3. Running FFmpeg dengan reconnect flags agar tidak gampang putus
+            ffmpeg -re -connect_delay 5000 -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2000 \
               -i "$VIDEO_URL" \
               -stream_loop -1 -i logo_video.mp4 \
               -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
               -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k \
-              -pix_fmt yuv420p -g 60 -c:a aac -ar 44100 -b:a 128k \
+              -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
-            echo "FFmpeg terhenti. Melakukan restart dalam 1 detik..."
-            sleep 1
+            echo "Koneksi terputus. Restarting dalam 5 detik..."
+            sleep 5
           done
           
