@@ -1,4 +1,4 @@
-name: YouTube Relay Simple (Final Fix)
+name: YouTube Relay Pro (Final Stable)
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ jobs:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Install Node.js (Penting untuk Bypass)
+      - name: 2. Install Node.js (Pondasi Utama)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -33,37 +33,38 @@ jobs:
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
-          # Jangan matikan script jika ada error kecil (reconnect loop)
           set +e
-          
           echo "$YT_COOKIES" > cookies.txt
           
           while true; do
             echo "--- [$(date)] Mengecek Sumber Video ---"
             
-            # Mengambil URL Video (Langkah tersulit yang sudah kita pecahkan)
+            # Mengambil URL dengan format yang lebih bersahabat untuk FFmpeg
             VIDEO_URL=$(yt-dlp --cookies cookies.txt \
                                --js-runtime node \
                                --force-ipv4 \
                                --extractor-args "youtube:player_client=mweb,web" \
-                               -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
+                               -f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720]" \
+                               -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "Gagal Ambil URL. YouTube mungkin butuh Cookies baru."
+              echo "Gagal Ambil URL. Cek Cookies!"
               sleep 15
               continue
             fi
 
-            echo "SUMBER AKTIF! Streaming sedang berjalan ke YouTube..."
-            
-            # FFmpeg versi fix (Tanpa unrecognized option)
+            echo "SUMBER AKTIF! Memulai FFmpeg..."
+
+            # FFmpeg dengan optimasi buffer dan keyframe agar tidak 'Skip' atau 'EOF'
             ffmpeg -re -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5 \
+              -probesize 10M -analyzeduration 10M \
               -i "$VIDEO_URL" \
               -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
+              -g 60 -keyint_min 60 -sc_threshold 0 \
               -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
-            echo "Koneksi FFmpeg terputus. Mengulang dalam 5 detik..."
+            echo "Koneksi terputus. Mengulang dalam 5 detik..."
             sleep 5
           done
           
