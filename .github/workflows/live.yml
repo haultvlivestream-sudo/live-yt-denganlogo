@@ -1,4 +1,4 @@
-name: YouTube Relay Pro (Ultra-Sakti)
+name: YouTube Relay Pro Ultra
 
 on:
   workflow_dispatch:
@@ -17,30 +17,36 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Node.js (PENTING: Untuk JavaScript Runtime)
+      - name: Install Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Tooling & yt-dlp Terbaru
+      - name: Install Tooling & yt-dlp Nightly
         run: |
-          sudo apt update && sudo apt install ffmpeg jq -y
-          # Menggunakan versi nightly agar selalu mendapatkan fix bypass YouTube terbaru
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg jq curl
+          # Menggunakan versi nightly yang lebih tahan banting
           sudo curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
           yt-dlp -U
 
       - name: Persiapan & Loop Streaming
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           set +e 
           
-          # Simpan cookies dari Secrets
-          echo "${{ secrets.YT_COOKIES }}" > cookies.txt
+          # Buat file cookies dari secrets
+          echo "$YT_COOKIES" > cookies.txt
           
-          # 1. Unduh Logo dengan Client mweb agar lebih aman
-          echo "Mengunduh logo..."
+          echo "Mengunduh logo sebagai overlay..."
           LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
+          
+          # Gunakan argumen sakti untuk download logo
           yt-dlp --cookies cookies.txt \
+                 --js-runtime nodejs \
+                 --force-ipv4 \
                  --extractor-args "youtube:player_client=mweb" \
                  -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
                  --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
@@ -50,32 +56,31 @@ jobs:
           while true; do
             echo "Mengecek ketersediaan video sumber..."
             
-            # 2. Ambil URL dengan Client mweb + Force IPv4 (Seringkali IPv6 GitHub diblokir YouTube)
-            # Menambahkan --js-runtime nodejs secara eksplisit
+            # Ambil URL streaming secara dinamis
             VIDEO_URL=$(yt-dlp --cookies cookies.txt \
                                --js-runtime nodejs \
                                --force-ipv4 \
-                               --extractor-args "youtube:player_client=mweb" \
+                               --extractor-args "youtube:player_client=mweb,web" \
                                -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "PERINGATAN: Gagal mengambil URL. Mungkin butuh PO Token atau Cookies baru. Cek dalam 10 detik..."
+              echo "PERINGATAN: Gagal tembus YouTube. Mencoba lagi dalam 10 detik..."
               sleep 10
               continue
             fi
 
-            echo "SUMBER AKTIF! Menjalankan FFmpeg..."
+            echo "SUMBER AKTIF! Memulai FFmpeg..."
 
-            # 3. Running FFmpeg dengan reconnect flags agar tidak gampang putus
+            # FFmpeg dengan settingan reconnect agar tahan lag
             ffmpeg -re -connect_delay 5000 -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2000 \
               -i "$VIDEO_URL" \
               -stream_loop -1 -i logo_video.mp4 \
-              -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=75:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
-              -c:v libx264 -preset veryfast -b:v 2500k -maxrate 2500k -bufsize 5000k \
+              -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=150:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
+              -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
               -c:a aac -ar 44100 -b:a 128k \
               -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
 
-            echo "Koneksi terputus. Restarting dalam 5 detik..."
+            echo "FFmpeg terhenti. Restart dalam 5 detik..."
             sleep 5
           done
           
