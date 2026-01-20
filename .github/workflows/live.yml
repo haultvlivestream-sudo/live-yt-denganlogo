@@ -14,49 +14,39 @@ jobs:
   streaming:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Node.js
+      - name: 2. Install Node.js (WAJIB PERTAMA)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Install Tooling & yt-dlp Nightly
+      - name: 3. Verifikasi Node.js & Install Tooling
         run: |
+          node -v # Mengecek apakah Node.js sudah benar-benar terinstal
           sudo apt-get update
           sudo apt-get install -y ffmpeg jq curl
-          # Menggunakan versi nightly yang lebih tahan banting
+          
+          # Install yt-dlp versi nightly (paling update untuk bypass)
           sudo curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
           sudo chmod a+rx /usr/local/bin/yt-dlp
           yt-dlp -U
 
-      - name: Persiapan & Loop Streaming
+      - name: 4. Eksekusi Streaming
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           set +e 
-          
-          # Buat file cookies dari secrets
           echo "$YT_COOKIES" > cookies.txt
           
-          echo "Mengunduh logo sebagai overlay..."
-          LINK_LOGO="https://youtu.be/zR6n39ZWrJM"
-          
-          # Gunakan argumen sakti untuk download logo
-          yt-dlp --cookies cookies.txt \
-                 --js-runtime nodejs \
-                 --force-ipv4 \
-                 --extractor-args "youtube:player_client=mweb" \
-                 -f "bestvideo[height<=720]+bestaudio/best[height<=720]" \
-                 --merge-output-format mp4 "$LINK_LOGO" -o logo_video.mp4
+          # Download logo
+          yt-dlp --cookies cookies.txt --js-runtime nodejs --extractor-args "youtube:player_client=mweb" -f "best" "https://youtu.be/zR6n39ZWrJM" -o logo_video.mp4
 
-          echo "Memulai sistem pemantauan streaming..."
-          
           while true; do
-            echo "Mengecek ketersediaan video sumber..."
+            echo "Mengambil URL Video Sumber..."
             
-            # Ambil URL streaming secara dinamis
+            # Memaksa yt-dlp menggunakan Node.js yang sudah diinstall di langkah 2
             VIDEO_URL=$(yt-dlp --cookies cookies.txt \
                                --js-runtime nodejs \
                                --force-ipv4 \
@@ -64,23 +54,14 @@ jobs:
                                -f "best[height<=720]" -g "${{ github.event.inputs.link_youtube }}" 2>/dev/null)
 
             if [ -z "$VIDEO_URL" ]; then
-              echo "PERINGATAN: Gagal tembus YouTube. Mencoba lagi dalam 10 detik..."
+              echo "Gagal tembus! Pastikan Cookies/NodeJS aktif. Coba lagi..."
               sleep 10
               continue
             fi
 
-            echo "SUMBER AKTIF! Memulai FFmpeg..."
-
-            # FFmpeg dengan settingan reconnect agar tahan lag
-            ffmpeg -re -connect_delay 5000 -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 2000 \
-              -i "$VIDEO_URL" \
-              -stream_loop -1 -i logo_video.mp4 \
+            ffmpeg -re -i "$VIDEO_URL" -stream_loop -1 -i logo_video.mp4 \
               -filter_complex "[1:v]colorkey=0x008100:0.1:0.1,scale=150:-1[logo]; [0:v][logo]overlay=W-w-15:15:shortest=1" \
-              -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3000k -bufsize 6000k \
-              -c:a aac -ar 44100 -b:a 128k \
-              -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
-
-            echo "FFmpeg terhenti. Restart dalam 5 detik..."
+              -c:v libx264 -preset veryfast -b:v 3000k -f flv "rtmp://a.rtmp.youtube.com/live2/${{ github.event.inputs.kunci_rtmp }}"
+            
             sleep 5
           done
-          
